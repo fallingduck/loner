@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+# Assuming an Arch Linux system
+
+if [ "$(id -u)" != "0" ]
+  then
+    echo "Please run as root!"
+    exit 1
+fi
+
+echo "Grabbing dependencies..."
+
+pacman -S python2 python2-pip
+pip2 install pyyaml dnslib gevent
+
+echo "Installing Loner..."
+
+if [ -e /etc/loner.conf ]
+  then
+    read -p "An existing configuration file exists, replace? [y/N] " -n 1 ANSWER
+    echo
+    if [ "$ANSWER" == "y" ] || [ "$ANSWER" == "Y" ]
+      then
+        echo "Replacing file..."
+        rm /etc/loner.conf
+        cp ./examples/loner.conf /etc/loner.conf
+      else
+        echo "Skipping..."
+    fi
+  else
+    echo "Copying example config..."
+    cp ./examples/loner.conf /etc/loner.conf
+fi
+
+echo "Copying code..."
+rm -rf /usr/local/lib/loner
+cp -r ./src /usr/local/lib/loner
+
+echo "Copying scripts..."
+cp ./scripts/* /usr/local/bin/
+
+echo "Installation complete!"
+echo "You will want to edit /etc/loner.conf to work with the nameservers you trust."
+echo "Run 'lonerd' to start!"
+echo "Exiting..."
