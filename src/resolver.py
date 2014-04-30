@@ -4,6 +4,7 @@ import gevent
 from gevent import socket
 
 import copy
+import time
 
 from dnslib import DNSRecord, RR
 
@@ -13,8 +14,19 @@ from config import config
 nameservers = [(addr, 53) for addr in config['nameservers']]
 
 
-def resolve(packet):
+def resolve(packet, cache={}):
     'Query every available nameserver, and attempt to unify the results'
+
+    try:
+        data = DNSRecord.parse(packet)
+
+    except Exception:
+        return ''  # The packet was formatted incorrectly, we can't do anything
+
+    answer = cache_lookup(data, cache)  # Search the local cache first
+
+    if answer:
+        return answer.pack()
 
     results = []  # List of all the valid responses received
     errors = []   # List of all the errors from invalid responses
@@ -23,16 +35,10 @@ def resolve(packet):
     gevent.joinall(
         [gevent.spawn(query_server, server, packet, results, errors)
             for server in nameservers],
-        timeout=config['server']['request_timeout']
+        timeout=config['resolver']['request_timeout']
     )
 
-    try:
-        data = DNSRecord.parse(packet)
-
-    except Exception:
-        return ''  # The packet was formatted incorrectly, we can't do anything
-
-    # Otherwise, if a majority of the servers didn't give us anything...
+    # If a majority of the servers didn't give us anything...
     if len(results) <= len(nameservers) // 2:
 
         answer = create_response(data)  # Construct an empty reply
@@ -64,7 +70,26 @@ def resolve(packet):
             answer = create_response(data)
             answer.add_answer(RR(data.q.qname, data.q.qtype, rdata=result))
 
+            # Add the answer to the cache
+            cache[(data.q.qname, data.q.qtype)] = (result,
+                                                   (time.time() + data.a.ttl))
+
     return answer.pack()
+
+
+def cache_lookup(data, cache):
+    'Look in local cache to find a record'
+
+    result = cache.get((data.q.qname, data.q.qtype))
+
+    if result is None:
+        return
+
+    else:
+        answer = create_response(data)
+        answer.add_answer(RR(data.q.qname, data.q.qtype, rdata=result[0]))
+
+    return answer
 
 
 def query_server(server, packet, results, errors):
